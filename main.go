@@ -14,12 +14,29 @@ import (
 	"cloud.google.com/go/pubsub"
 )
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*") // Change * to specific domain for production
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		// Handle preflight requests
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	log.Print("starting server...")
-	http.HandleFunc("/", handler)
-	http.HandleFunc("/signup", signupHandler)
-	http.HandleFunc("/sendEmail", checkSMTPServer)
-	http.HandleFunc("/notification", notificationHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handler)
+	mux.HandleFunc("/signup", signupHandler)
+	mux.HandleFunc("/sendEmail", checkSMTPServer)
+	mux.HandleFunc("/notification", notificationHandler)
 
 	// Determine port for HTTP service.
 	port := os.Getenv("PORT")
@@ -47,7 +64,7 @@ func main() {
 
 	// Start HTTP server.
 	log.Printf("listening on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServe(":"+port, corsMiddleware(mux)); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -179,8 +196,42 @@ func recieveMessage(ctx context.Context, projectID, subID string) error {
 		var message models.Message
 		err = json.Unmarshal(msg.Data, &message)
 		log.Printf("Recieved message: ID=%d, username=%s, email=%s", message.ID, message.USERNAME, message.EMAIL)
+		log.Print("sending Notification.....")
+		err = sendNotification()
+		if err != nil {
+			log.Fatalf("Error in Sending notification: %v", err)
+		}
 		msg.Ack()
 	})
+	return nil
+}
 
+func sendNotification() error {
+	auth := smtp.PlainAuth(
+		"",
+		"smtp.paul123@gmail.com",
+		"tyhgueeqlvqefslp",
+		"smtp.gmail.com",
+	)
+
+	// Email details
+	from := "smtp.paul123@gmail.com"
+	to := []string{"paulsapto@gmail.com"}
+	subject := "Subject: Test Email from Go\n"
+	// body := fmt.Sprintf("ID: %d\nUsername: %s\nEmail: %s", message.ID, message.USERNAME, message.EMAIL)
+	body := "This is body"
+
+	msg := []byte(subject + "\n" + body)
+
+	smtpHost := "smtp.gmail.com"
+	smtpPort := "587"
+
+	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, from, to, msg)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return err
+	}
+
+	fmt.Println("Email sent successfully!")
 	return nil
 }
